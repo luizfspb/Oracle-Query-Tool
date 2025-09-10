@@ -1,0 +1,484 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Oracle Query Tool - Web DB</title>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/monaco-editor@0.38.0/min/vs/loader.js"></script>
+    <style>
+        :root{--bg:#f4f6fb;--panel:#fff;--muted:#6c757d;--accent:#3b82f6}
+        *{box-sizing:border-box}
+        body{margin:0;font-family:Inter,Segoe UI,Arial,sans-serif;background:var(--bg);height:100vh;display:flex;flex-direction:column}
+        .topbar{height:56px;background:#111827;color:#fff;display:flex;align-items:center;padding:0 16px;gap:12px}
+        .topbar h1{font-size:16px;margin:0}
+        .app{flex:1;display:flex;gap:12px;padding:12px}
+        .panel{background:var(--panel);border-radius:8px;box-shadow:0 2px 6px rgba(16,24,40,0.06);padding:12px;overflow:auto}
+        .left{width:260px;display:flex;flex-direction:column;gap:12px}
+        .center{flex:1;display:flex;flex-direction:column;gap:12px}
+        /* painel direito removido — ocupará espaço pelo centro */
+        .right{display:none}
+        .section-title{font-weight:700;color:#111827;margin-bottom:8px;font-size:13px}
+        label{font-size:12px;color:var(--muted);display:block;margin-bottom:6px}
+        input[type=text], input[type=password], input[type=number], select, textarea{width:100%;padding:8px;border:1px solid #e6eef6;border-radius:6px;background:#fff}
+        textarea.sql-editor{min-height:120px;font-family:monospace;font-size:13px}
+        /* aumentar área de resultados */
+        .results{border-top:1px solid #eef2ff;padding-top:8px;flex:1;min-height:320px;display:flex;flex-direction:column}
+        .results .section-title{margin-bottom:6px}
+        /* garantir que a tabela ocupe o espaço disponível */
+        #resultsTable{width:100%;height:100%;display:block;overflow:auto}
+        .btn{display:inline-flex;align-items:center;gap:8px;padding:8px 12px;border-radius:6px;border:none;cursor:pointer}
+        .btn-primary{background:var(--accent);color:#fff}
+        .btn-ghost{background:#f1f5f9;color:#0f172a}
+        .tables-list{max-height:420px;overflow:auto;border:1px solid #eef2ff;border-radius:6px;padding:8px}
+        .table-row{display:flex;justify-content:space-between;align-items:center;padding:6px;border-radius:6px;cursor:pointer}
+        .table-row:hover{background:#f8fafc}
+        .small{font-size:12px;color:var(--muted)}
+        .results{border-top:1px solid #eef2ff;padding-top:8px}
+        table.res{width:100%;border-collapse:collapse;font-size:13px}
+        table.res th, table.res td{padding:8px;border-bottom:1px solid #f1f5f9;text-align:left}
+        .controls{display:flex;gap:8px;align-items:center}
+        .footer{height:36px;background:#fff;display:flex;align-items:center;padding:0 12px;border-top:1px solid #e6eef6}
+        .muted{color:var(--muted)}
+        .flex{display:flex;gap:8px}
+        .pill{background:#eef2ff;padding:6px 8px;border-radius:999px;font-size:12px}
+        .desc-table{width:100%;border-collapse:collapse}
+        .desc-table th, .desc-table td{padding:6px;border-bottom:1px solid #f1f5f9;font-size:13px}
+        .search-input{padding:8px;border:1px solid #e6eef6;border-radius:6px}
+    </style>
+</head>
+<body>
+    <div class="topbar">
+        <h1>Oracle Query Tool - Web DB</h1>
+        <!-- aviso removido para ampliar área do editor/resultados -->
+    </div>
+
+    <div class="app">
+        <div class="panel left">
+            <div>
+                <div class="section-title">Conexão</div>
+                <div style="display:flex;flex-direction:column;gap:8px">
+                    <div id="connectionStatus" class="small muted">Desconectado</div>
+                    <button class="btn btn-primary" id="btnOpenConn">Abrir Conexão</button>
+                </div>
+            </div>
+
+            <hr style="margin:12px 0;border:none;border-top:1px solid #eef2ff">
+
+            <div>
+                <div class="section-title">Tabelas / Schemas</div>
+                <input class="search-input" id="tableSearch" placeholder="Buscar tabela ou schema">
+                <div style="height:8px"></div>
+                <div class="tables-list" id="tablesList"></div>
+            </div>
+        </div>
+
+        <div class="panel center">
+            <div>
+                <div class="section-title">Editor SQL</div>
+                <div id="editor" class="sql-editor" style="height:120px;border:1px solid #e6eef6;border-radius:6px;"></div>
+                <div style="display:flex;justify-content:space-between;align-items:center;margin-top:8px">
+                    <div class="controls">
+                        <button class="btn btn-primary" id="btnExecute">▶️ Executar</button>
+                        <button class="btn btn-ghost" id="btnClear">Limpar</button>
+                        <button class="btn btn-ghost" id="btnExport" disabled>📥 Exportar</button>
+                    </div>
+                    <div class="controls">
+                        <div class="pill" id="queryInfo">0 registros</div>
+                    </div>
+                </div>
+            </div>
+
+            <div class="results" style="margin-top:12px;min-height:220px;">
+                <div class="section-title">Resultados</div>
+                <div style="overflow:auto;max-height:520px;">
+                    <table class="res" id="resultsTable">
+                        <thead id="tableHeader"></thead>
+                        <tbody id="tableBody"></tbody>
+                    </table>
+                </div>
+            </div>
+
+            <!-- Description moved here (hidden by default) -->
+            <div id="tableDescription" class="small muted" style="display:none;margin-top:8px">Clique em Detalhes ao lado de uma tabela</div>
+
+        </div>
+    </div>
+
+    <div class="footer small muted">Oracle Query Tool - use com cuidado. Em produção, proteja com autenticação e HTTPS.</div>
+
+    <!-- Modal de conexão -->
+    <div id="connModal" style="display:none; position:fixed; inset:0; z-index:60;">
+        <div style="position:absolute; inset:0; background:rgba(2,6,23,0.6);" onclick="closeConnectionModal()"></div>
+        <div style="position:relative; width:520px; max-width:95%; margin:80px auto; background:#fff; border-radius:8px; padding:16px; box-shadow:0 10px 30px rgba(2,6,23,0.4);">
+            <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px">
+                <div class="section-title" style="margin:0">Conectar ao Oracle</div>
+                <button class="btn btn-ghost" onclick="closeConnectionModal()">Fechar</button>
+            </div>
+            <div style="display:grid;gap:8px">
+                <label>Hostname / IP</label>
+                <input type="text" id="hostname" value="">
+                <label>Porta</label>
+                <input type="number" id="port" value="">
+                <label>Service Name / SID</label>
+                <input type="text" id="serviceName" value="">
+                <label>Usuário</label>
+                <input type="text" id="username" value="">
+                <label>Senha</label>
+                <input type="password" id="password">
+                <div style="display:flex;gap:8px;margin-top:6px">
+                    <button class="btn btn-primary" id="btnConnect">Conectar</button>
+                    <button class="btn btn-ghost" onclick="closeConnectionModal()">Cancelar</button>
+                </div>
+                <div id="modalConnectionStatus" class="small muted"></div>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        // Monaco editor instance
+        let editor = null;
+
+        function initMonaco() {
+            if (typeof require === 'undefined') {
+                console.warn('Monaco loader não disponível');
+                return;
+            }
+            require.config({ paths: { vs: 'https://cdn.jsdelivr.net/npm/monaco-editor@0.38.0/min/vs' } });
+            require(['vs/editor/editor.main'], function () {
+                editor = monaco.editor.create(document.getElementById('editor'), {
+                    value: 'SELECT * FROM DUAL',
+                    language: 'sql',
+                    theme: 'vs',
+                    automaticLayout: true,
+                    minimap: { enabled: false }
+                });
+            });
+        }
+
+        function getQueryValue() {
+            return editor ? editor.getValue() : document.getElementById('queryText')?.value || '';
+        }
+
+        function setQueryValue(v) {
+            if (editor) editor.setValue(v);
+            const t = document.getElementById('queryText'); if (t) t.value = v;
+        }
+
+        // estado
+        let isConnected = false;
+        let currentResults = [];
+        let currentPage = 1;
+        let currentPageSize = 100;
+        let lastTotal = null;
+
+        // elementos
+        const btnConnect = document.getElementById('btnConnect');
+        const btnDisconnect = document.getElementById('btnDisconnect');
+        const btnExecute = document.getElementById('btnExecute');
+        const btnExport = document.getElementById('btnExport');
+        const btnClear = document.getElementById('btnClear');
+        const tablesList = document.getElementById('tablesList');
+        const tableSearch = document.getElementById('tableSearch');
+        // const queryText = document.getElementById('queryText');
+        const tableHeader = document.getElementById('tableHeader');
+        const tableBody = document.getElementById('tableBody');
+        const paginationInfo = document.getElementById('paginationInfo');
+        const prevPage = document.getElementById('prevPage');
+        const nextPage = document.getElementById('nextPage');
+        const tableDescription = document.getElementById('tableDescription');
+        const connectionStatus = document.getElementById('connectionStatus');
+        const queryInfo = document.getElementById('queryInfo');
+
+        function setConnectedUI(connected){
+            isConnected = connected;
+            if (btnDisconnect) btnDisconnect.disabled = !connected;
+            if (btnConnect) btnConnect.disabled = connected;
+            if (btnExecute) btnExecute.disabled = !connected;
+            if(!connected){tablesList.innerHTML=''; tableDescription.innerHTML='Clique em Detalhes ao lado de uma tabela'}
+        }
+
+        // Funções para modal de conexão
+        function openConnectionModal(){
+            const m = document.getElementById('connModal');
+            if(m) m.style.display = 'block';
+        }
+
+        function closeConnectionModal(){
+            const m = document.getElementById('connModal');
+            if(m) m.style.display = 'none';
+            const modalStatus = document.getElementById('modalConnectionStatus'); if(modalStatus) modalStatus.innerText = '';
+        }
+
+        // Substitui comportamento de connect para também atualizar o status dentro do modal
+        async function connect(){
+            const hostname = document.getElementById('hostname').value;
+            const port = document.getElementById('port').value;
+            const serviceName = document.getElementById('serviceName').value;
+            const username = document.getElementById('username').value;
+            const password = document.getElementById('password').value;
+            const modalStatus = document.getElementById('modalConnectionStatus');
+            connectionStatus.innerText = 'Conectando...'; if(modalStatus) modalStatus.innerText = 'Conectando...';
+            try{
+                const res = await fetch('/api/connect',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({hostname,port,serviceName,username,password})});
+                const data = await res.json();
+                if(data.success){
+                    connectionStatus.innerText = 'Conectado: '+data.user+'@'+data.server;
+                    if(modalStatus) modalStatus.innerText = 'Conectado com sucesso';
+                    setConnectedUI(true);
+                    closeConnectionModal();
+                    await loadTables();
+                } else { throw new Error(data.message||'Erro na conexão') }
+            }catch(err){
+                connectionStatus.innerText = 'Erro: '+err.message; if(modalStatus) modalStatus.innerText = 'Erro: '+err.message;
+            }
+        }
+
+        async function disconnect(){
+            try{await fetch('/api/disconnect',{method:'POST'});}catch(e){}
+            setConnectedUI(false);
+            connectionStatus.innerText = 'Desconectado';
+        }
+
+        async function loadTables(){
+            tablesList.innerHTML = '<div class="small muted">Carregando...</div>';
+            try{
+                const res = await fetch('/api/tables');
+                const data = await res.json();
+                if(data.success){
+                    renderTables(data.tables||[]);
+                }else{tablesList.innerHTML = '<div class="small muted">Erro ao listar tabelas</div>'}
+            }catch(err){tablesList.innerHTML = '<div class="small muted">Erro: '+err.message+'</div>'}
+        }
+
+        function renderTables(tables){
+            tablesList.innerHTML = '';
+            if(!tables.length){tablesList.innerHTML='<div class="small muted">Nenhuma tabela disponível</div>';return}
+            tables.forEach(t=>{
+                const row = document.createElement('div'); row.className='table-row';
+                const name = document.createElement('div'); name.innerText = t; name.style.flex='1';
+                const btnDet = document.createElement('button'); btnDet.className='btn btn-ghost'; btnDet.innerText='Detalhes';
+                btnDet.onclick = async (e)=>{ e.stopPropagation(); await describeTable(t); };
+                row.onclick = async ()=>{ 
+                    const q = `SELECT * FROM ${t} WHERE ROWNUM <= 100`;
+                    console.log('[DEBUG] clique tabela, preenchendo editor com:', q);
+                    setQueryValue(q);
+                    // executar verificação rápida de acesso/contagem
+                    await checkTable(t);
+                    // executar automaticamente a query sem paginação (trazer todos os resultados)
+                    currentPage = 1;
+                    execute(1, 0);
+                };
+                row.appendChild(name); row.appendChild(btnDet); tablesList.appendChild(row);
+            });
+        }
+
+        // Verificar acesso à tabela e contar registros (diagnóstico)
+        async function checkTable(table) {
+            const statusEl = document.getElementById('connectionStatus');
+            if (statusEl) statusEl.innerText = `Verificando tabela ${table}...`;
+            try {
+                console.log('[DEBUG] checkTable - executando COUNT para', table);
+                const res = await fetch('/api/execute', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ query: `SELECT COUNT(*) AS CNT FROM ${table}`, pageSize: 0 })
+                });
+                const data = await res.json();
+                console.log('[DEBUG] checkTable response:', data);
+                if (data.success && data.results && data.results.length > 0) {
+                    const cnt = data.results[0].CNT || data.results[0].cnt || Object.values(data.results[0])[0];
+                    if (statusEl) statusEl.innerText = `Tabela ${table}: ${cnt} registro(s)`;
+                } else if (data.success) {
+                    if (statusEl) statusEl.innerText = `Tabela ${table}: 0 registros`;
+                } else {
+                    if (statusEl) statusEl.innerText = `Erro ao verificar tabela: ${data.message || 'sem mensagem'}`;
+                }
+            } catch (err) {
+                console.error('[DEBUG] checkTable error:', err);
+                if (statusEl) statusEl.innerText = `Erro ao verificar tabela: ${err.message}`;
+            }
+        }
+
+        tableSearch.addEventListener('input', ()=>{
+            const q = tableSearch.value.trim().toLowerCase();
+            Array.from(tablesList.children).forEach(ch=>{ const txt = (ch.innerText||'').toLowerCase(); ch.style.display = txt.includes(q)?'flex':'none'; });
+        });
+
+        async function describeTable(table){
+            try{
+                tableDescription.innerHTML = '<div class="small muted">Carregando...</div>';
+                const res = await fetch('/api/describe',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({table})});
+                const data = await res.json();
+                if(data.success){
+                    renderDescription(data);
+                } else { tableDescription.innerHTML = '<div class="small muted">Erro: '+(data.message||'')+'</div>' }
+            }catch(err){ tableDescription.innerHTML = '<div class="small muted">Erro: '+err.message+'</div>' }
+        }
+
+        function renderDescription(d){
+            const div = document.createElement('div');
+            div.innerHTML = `<div style="font-weight:700;margin-bottom:8px">${d.owner}.${d.table}</div>`;
+            const table = document.createElement('table'); table.className='desc-table';
+            const thead = document.createElement('thead'); thead.innerHTML = '<tr><th>Coluna</th><th>Tipo</th><th>Tamanho</th><th>Precision</th><th>Scale</th><th>NULO</th></tr>';
+            table.appendChild(thead);
+            const tbody = document.createElement('tbody');
+            (d.columns||[]).forEach(c=>{ const tr = document.createElement('tr'); tr.innerHTML = `<td>${c.column_name}</td><td>${c.data_type}</td><td>${c.data_length||''}</td><td>${c.data_precision||''}</td><td>${c.data_scale||''}</td><td>${c.nullable||''}</td>`; tbody.appendChild(tr); });
+            table.appendChild(tbody);
+            div.appendChild(table);
+            tableDescription.innerHTML = ''; tableDescription.appendChild(div);
+        }
+
+        async function execute(page=1,pageSize=0){
+            let sql = getQueryValue().trim();
+            if(!sql){ alert('Digite uma query'); return }
+            page = parseInt(page||1); pageSize = parseInt(pageSize||0);
+            
+            console.log('[DEBUG] execute - SQL inicial:', sql, 'page:', page, 'pageSize:', pageSize);
+
+            // converter datas no formato 'DD-MM-YY' ou 'DD-MM-YYYY' para TO_DATE(...)
+            let converted = false;
+            sql = sql.replace(/'(\d{2}-\d{2}-\d{2,4})'/g, (match, p1) => {
+                const parts = p1.split('-');
+                const yearPart = parts[2] || '';
+                const format = yearPart.length === 2 ? 'DD-MM-RR' : 'DD-MM-YYYY';
+                converted = true;
+                return `TO_DATE('${p1}','${format}')`;
+            });
+
+            // detectar se a query já contém limitação de linhas (ROWNUM, ROW_NUMBER, OFFSET, FETCH)
+            const lowerSql = sql.toLowerCase();
+            const hasRowLimit = /\b(rownum|row_number|offset|fetch)\b/i.test(lowerSql);
+            if (hasRowLimit) {
+                // forçar sem paginação para respeitar a limitação do usuário
+                pageSize = 0;
+                page = 1;
+                const modalStatus = document.getElementById('modalConnectionStatus');
+                if (modalStatus) modalStatus.innerText = 'Aviso: query contém limitação (ROWNUM/OFFSET), executando sem paginação.';
+            }
+
+            if (converted) {
+                const modalStatus = document.getElementById('modalConnectionStatus');
+                if (modalStatus) modalStatus.innerText = 'Aviso: datas convertidas para TO_DATE antes da execução.';
+            }
+
+            queryInfo.innerText = 'Executando...';
+
+            // helper para executar (sempre sem paginação - pageSize = 0)
+            async function fetchPage(p) {
+                try{
+                    console.log('[DEBUG] fetchPage - enviando /api/execute', { query: sql, page: p, pageSize: 0 });
+                    const res = await fetch('/api/execute',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({query:sql,page:p,pageSize:0})});
+                    const data = await res.json();
+                    console.log('[DEBUG] fetchPage - resposta /api/execute:', data);
+                    return data;
+                } catch(e){ console.error('[DEBUG] fetchPage error:', e); return { success:false, message: e.message } }
+            }
+
+            try{
+                const maxAttempts = 5;
+                let attempt = 0;
+                let current = page;
+                let finalData = null;
+
+                while(attempt < maxAttempts){
+                    const data = await fetchPage(current);
+                    finalData = data;
+
+                    if(!data.success){ alert('Erro: '+(data.message||'')); break; }
+
+                    const rows = data.results || [];
+                    console.log('[DEBUG] execute loop - page', current, 'rows returned', rows.length);
+                    // se trouxe linhas ou não há paginação info (pageSize=0), para
+                    if(rows.length > 0 || pageSize === 0){
+                        currentResults = rows;
+                        lastTotal = data.totalCount || null;
+                        renderResults(currentResults);
+                        updatePagination(Object.assign({}, data, { page: current, pageSize }));
+                        break;
+                    }
+
+                    // se sabemos o total e ainda há páginas, tentar próxima
+                    if(data.totalCount !== undefined && pageSize > 0){
+                        const pages = Math.max(1, Math.ceil(data.totalCount / pageSize));
+                        if(current < pages){
+                            current++;
+                            attempt++;
+                            continue; // tenta próxima página
+                        }
+                    }
+
+                    // nada encontrado e não há mais páginas
+                    currentResults = rows;
+                    lastTotal = data.totalCount || null;
+                    renderResults(currentResults);
+                    updatePagination(Object.assign({}, data, { page: current, pageSize }));
+                    break;
+                }
+
+            }catch(err){ alert('Erro: '+err.message) }
+
+            queryInfo.innerText = `${currentResults.length} registros`;
+        }
+
+        function renderResults(rows){
+            tableHeader.innerHTML = '';
+            tableBody.innerHTML = '';
+            if(!rows || !rows.length){ tableBody.innerHTML = '<tr><td colspan="100%" class="small muted">Sem resultados</td></tr>'; return }
+            const cols = Object.keys(rows[0]);
+            const trh = document.createElement('tr'); cols.forEach(c=>{ const th = document.createElement('th'); th.innerText = c; trh.appendChild(th); }); tableHeader.appendChild(trh);
+            rows.forEach(r=>{ const tr = document.createElement('tr'); cols.forEach(c=>{ const td = document.createElement('td'); let v = r[c]; if(v===null||v===undefined) v=''; td.innerText = v; tr.appendChild(td); }); tableBody.appendChild(tr); });
+            btnExport.disabled = false;
+        }
+
+        // limpa resultados e estado
+        function clearResults(){
+            try{ tableHeader.innerHTML=''; tableBody.innerHTML=''; currentResults = []; btnExport.disabled = true; queryInfo.innerText = '0 registros'; }catch(e){console.warn('clearResults error',e)}
+        }
+        
+        // listener do botão Executar
+        if (btnExecute) btnExecute.addEventListener('click', ()=>{ currentPage = 1; execute(1, 0); });
+
+        function updatePagination(data){
+            const infoEl = paginationInfo || document.getElementById('paginationInfo');
+            const prevBtn = prevPage || document.getElementById('prevPage');
+            const nextBtn = nextPage || document.getElementById('nextPage');
+
+            if(data && data.totalCount!==undefined && data.pageSize>0){
+                const total = data.totalCount; const page = data.page||1; const pageSize = data.pageSize;
+                const pages = Math.max(1, Math.ceil(total/pageSize));
+                if(infoEl) infoEl.innerText = `Página ${page} / ${pages} (Total ${total})`;
+                if(prevBtn) prevBtn.disabled = page<=1;
+                if(nextBtn) nextBtn.disabled = page>=pages;
+                currentPage = page; currentPageSize = pageSize;
+            } else {
+                if(infoEl) infoEl.innerText = '';
+                if(prevBtn) prevBtn.disabled = true;
+                if(nextBtn) nextBtn.disabled = true;
+            }
+        }
+
+        // paginação removida: controles Prev/Next ocultos
+
+        if (btnExport) btnExport.addEventListener('click', ()=>{
+             if(!currentResults || !currentResults.length){ alert('Sem dados para exportar'); return }
+             const ws = XLSX.utils.json_to_sheet(currentResults);
+             const wb = XLSX.utils.book_new(); XLSX.utils.book_append_sheet(wb,ws,'Resultados'); XLSX.writeFile(wb,`resultados_${new Date().toISOString().slice(0,10)}.xlsx`);
+         });
+
+        if (btnClear) btnClear.addEventListener('click', ()=>{ setQueryValue(''); clearResults(); });
+
+        // evento para abrir modal e listeners seguros
+        document.addEventListener('click', function(){
+            const openBtn = document.getElementById('btnOpenConn'); if(openBtn) openBtn.addEventListener('click', openConnectionModal);
+            const modalConnectBtn = document.getElementById('btnConnect'); if(modalConnectBtn) modalConnectBtn.addEventListener('click', connect);
+            if (btnDisconnect) btnDisconnect.addEventListener('click', disconnect);
+        }, { once: true });
+
+        // init
+        initMonaco();
+        setConnectedUI(false);
+        clearResults();
+    </script>
+</body>
+</html>
